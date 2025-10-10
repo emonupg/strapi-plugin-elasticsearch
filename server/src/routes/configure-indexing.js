@@ -38,5 +38,11 @@ module.exports = {
         handler: 'configureIndexing.importContentConfig',
         config: { policies: [] },
       },
+      {
+        method: 'GET',
+        path: '/list-transformers',
+        handler: 'configureIndexing.getTransformers',
+        config: { policies: [] },
+      },
     ],
   };

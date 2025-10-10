@@ -9,6 +9,10 @@ module.exports = ({ strapi }) => {
     return configureIndexingService.getContentConfig();
   };
 
+  const getTransformers = async (ctx) => {
+    return configureIndexingService.getTransformers();
+  };
+
   const saveCollectionConfig = async (ctx) => {
     const { body } = ctx.request;
     try {
@@ -61,6 +65,7 @@ module.exports = ({ strapi }) => {
     getCollectionConfig,
     saveCollectionConfig,
     exportContentConfig, 
-    importContentConfig
+    importContentConfig,
+    getTransformers
   };  
 };

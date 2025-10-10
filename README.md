@@ -167,6 +167,36 @@ The subfields JSON also supports multiple level of nesting:
 ```
 Note: Indexing of `relations` attributes isn't yet supported.
 
+## Transforming data before indexing
+To modify the data stored within Strapi before it is submitted by the plugin for indexing, transformer functions can be setup.
+
+1. Define all the transformer functions within `src/extensions/elasticsearch/strapi-server.ts` as following (it is vital for the transformer function to return the transformed data):
+
+```JavaScript
+import { markdownToTxt } from 'markdown-to-txt';
+
+export default (plugin) => {
+    plugin.config.transformers = {
+        capitalize: (value: string) => {
+            return value.charAt(0).toUpperCase() + value.slice(1);
+        },
+        renderMarkdown: (value: string) => {
+            return markdownToTxt(value);
+        },
+        roundFloatValue: (value: number) => {
+            return value.toFixed(2);
+        }
+    };
+    return plugin;
+}
+```
+2. Once defined, a drop-down to select the transformer function shall be available with the list of function names (as in the screenshot below). Select the transformer function for specific fields.
+![image](https://github.com/user-attachments/assets/fa21c228-1d2f-48cc-b6d3-c921bf6a0b5e)
+
+3. With the above setup in place:
+- Your transformer function will execute every time before submitting the data for indexing.
+- The data returned from the transformer function will be submitted for indexing.
+
 ## Exporting and Importing indexing configuration
 To enable backing up the indexing configuration or transferring it between various environments, these can be Exported / Imported from the `Configure Collections` view.
 

@@ -3,11 +3,11 @@ import { Page } from '@strapi/admin/strapi-admin';
 import { useFetchClient } from '@strapi/admin/strapi-admin';
 import { useParams } from 'react-router-dom';
 import  { SubNavigation } from '../components/SubNavigation';;
-import { Box, Flex } from '@strapi/design-system';
+import { Box, Flex, SingleSelect, SingleSelectOption } from '@strapi/design-system';
 import { Toggle } from '@strapi/design-system';
 import { Link } from '@strapi/design-system';
 import pluginId from '../pluginId';
-import { apiGetCollectionConfig, apiSaveCollectionConfig } from "../utils/apiUrls";
+import { apiGetCollectionConfig, apiSaveCollectionConfig, apiGetTransformers } from "../utils/apiUrls";
 import { Alert } from '@strapi/design-system';
 import { Button } from '@strapi/design-system';
 import { ArrowLeft } from '@strapi/icons';
@@ -17,8 +17,7 @@ import Loader from "../components/Loader";
 
 
 
-const ConfigureField = ({config, index, setFieldConfig}) => {
-
+const ConfigureField = ({config, index, setFieldConfig, transformersList}) => {
     const validateSubfieldsConfig = (conf) => {
         if (conf && conf.length > 0)
         {
@@ -46,19 +45,38 @@ const ConfigureField = ({config, index, setFieldConfig}) => {
         setFieldConfig({index, config: {...config, searchFieldName: mappedName}})
     }
 
+    const updateTransformerFunction = (transformerFunction) => {
+        setFieldConfig({index, config: {...config, transformerFunction}})
+    }
+
     return (
         <Box background="neutral100" borderColor="neutral200" hasRadius index={index} 
         padding={4}>
             <Box paddingTop={2} paddingBottom={2}>
-            <Typography fontWeight="bold" textColor="neutral600">{config.name}</Typography>
+                <Typography fontWeight="bold" textColor="neutral600">{config.name}</Typography>
             </Box>
             <Box paddingTop={2} paddingBottom={2}>
-            <Toggle label="Index" onLabel="Yes" offLabel="No"
-                checked={config.index} onChange={(e) => updateIndex(e.target.checked)} />
+                <Toggle label="Index" onLabel="Yes" offLabel="No"
+                    checked={config.index} onChange={(e) => updateIndex(e.target.checked)} />
             </Box>
-            <Box width="50%"  paddingTop={2} paddingBottom={2}>
-                <TextInput label="Maps to search field" placeholder="Enter field name" name="Search field" onChange={e => updateMappedFieldName(e.target.value)} value={config.searchFieldName || ""} />
-            </Box>
+            <Flex direction="row" gap={2}>
+                <Box width="50%"  paddingTop={2} paddingBottom={2}>
+                    <TextInput label="Maps to search field" placeholder="Enter field name" name="Search field" onChange={e => updateMappedFieldName(e.target.value)} value={config.searchFieldName || ""} />
+                </Box>
+                {
+                    transformersList.length > 0 && (
+                        <Box width="50%"  paddingTop={2} paddingBottom={2}>
+                            <SingleSelect placeholder="Select a transformer function" name="Transformer function" value={config.transformerFunction || null} onChange= {updateTransformerFunction}>
+                                {
+                                    transformersList.map((transformer) => (
+                                        <SingleSelectOption value={transformer} key={transformer}>{transformer}</SingleSelectOption>
+                                    ))
+                                }
+                            </SingleSelect>
+                        </Box>
+                    )
+                }
+            </Flex>
             {
                 config.index && config.type && config.type === "dynamiczone" ? (
                     <Box paddingTop={2} paddingBottom={2}>
@@ -89,7 +107,7 @@ const ConfigureCollection = () => {
     const [isInProgress, setIsInProgress] = useState(false);
     const [selectedCollection, setSelectedCollection] = useState(null);
     const [collectionConfig, setCollectionConfig] = useState(null);
-
+    const [transformersList, setTransformersList] = useState([]);
     const params = useParams();
     const [alertContent, setAlertContent] = useState(null);
     const { get, post } = useFetchClient();
@@ -104,6 +122,11 @@ const ConfigureCollection = () => {
             collectionName: collectionConfig.collectionName,
             attributes: collectionConfig.attributes.map((e, idx) => index === idx ? config : e)
         });
+    }
+
+    const loadTransformers = () => {
+        return get(apiGetTransformers)
+            .then((resp) => resp.data);
     }
 
     const loadConfigForCollection = (collectionName) => {
@@ -145,6 +168,11 @@ const ConfigureCollection = () => {
             .finally(() => setIsInProgress(false));
         }
     }
+
+    useEffect(() => {
+        loadTransformers()
+            .then((resp) => setTransformersList(resp));
+    }, [selectedCollection]);
 
     useEffect(() => {
         if (params && params.collectionName)
@@ -218,7 +246,7 @@ const ConfigureCollection = () => {
                                     {
                                         collectionConfig.attributes.map((a, idx) => {
                                             return <Box paddingTop={4} paddingBottom={4}><ConfigureField index={idx} config={a} 
-                                            setFieldConfig={updateCollectionsConfig} /></Box>
+                                            setFieldConfig={updateCollectionsConfig} transformersList={transformersList} /></Box>
                                         })
                                     }
                                 </Box>
