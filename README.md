@@ -184,6 +184,11 @@ Whenever a collection is configured for indexing, it may already have data that 
 
 ![image](https://github.com/geeky-biz/strapi-plugin-elasticsearch/assets/17068206/7f37453a-dc87-406a-8de0-0391018b7fb5)
 
+### Triggering Indexing Externally
+To trigger indexing from an external event:
+- From `Users & Permissions Plugin` -> `Roles` -> Select a Role -> `ElasticSearch`, select `triggerIndexing`
+- Now, for that role, invoking the route `/api/elasticsearch/trigger-indexing/` shall trigger indexing to index all the data that is pending to be indexed (same behavior as that when clicking the `Trigger Indexing` button from the Strapi Admin UI Elasticsearch Plugin screen).
+
 ## Searching
 You may directly use the Elasticsearch search API or you may use the Search API exposed by the plugin (at `/api/elasticsearch/search`). The plugin search API is just a wrapper around the Elasticsearch search API that passes the query parameter to the Elasticsearch search API and returns the results coming from Elasticsearch:
 
