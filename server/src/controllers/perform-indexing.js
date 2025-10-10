@@ -16,6 +16,10 @@ module.exports = ({ strapi }) => {
             return null;
     }
 
+    const triggerIndexing = async (ctx) => {
+        return await indexer.indexPendingData()
+    }
+
     const triggerIndexingTask = async (ctx) => {
         return await indexer.indexPendingData()
     }
@@ -23,6 +27,7 @@ module.exports = ({ strapi }) => {
     return {
         rebuildIndex,
         indexCollection,
-        triggerIndexingTask
+        triggerIndexingTask,
+        triggerIndexing
     };     
 }
