@@ -10,4 +10,5 @@ export const apiTriggerIndexing = `/${pluginId}/trigger-indexing/`
 
 export const apiExportContentConfig = `/${pluginId}/export-content-config/`
 export const apiImportContentConfig = `/${pluginId}/import-content-config/`
+export const apiGetTransformers = `/${pluginId}/list-transformers/`
 

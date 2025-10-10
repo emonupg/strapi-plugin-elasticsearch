@@ -128,6 +128,9 @@ module.exports = ({ strapi }) => ({
     else
       return apiContentConfig;
   },
+  getTransformers() {
+    return Object.keys(strapi.plugins['elasticsearch'].config('transformers') || {});
+  },
   async importContentConfig({config}){
     const pluginStore = getPluginStore();
     const settings = await pluginStore.get({ key: 'configsettings' });

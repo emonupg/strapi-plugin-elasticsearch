@@ -225,6 +225,16 @@ function extractSubfieldData({config, data }) {
     return returnData;    
 }
 
+const tranformValueBeforeSubmittingToElasticsearch = (val, transformerFunctionName) => {
+  const transformerFunctionsList = strapi.plugins['elasticsearch'].config('transformers');
+  if (Object.keys(transformerFunctionsList).includes(transformerFunctionName)) {
+    const transformerFunction = transformerFunctionsList[transformerFunctionName];
+    return transformerFunction(val);
+  }
+  else 
+    return val;
+}
+
 module.exports = ({ strapi }) => ({
     async getElasticsearchInfo() {
         const configureService = strapi.plugins['elasticsearch'].services.configureIndexing;
@@ -347,9 +357,9 @@ module.exports = ({ strapi }) => ({
                 }
                     
                 if (Object.keys(fieldConfig).includes('searchFieldName'))
-                    document[fieldConfig['searchFieldName']] = val;
+                    document[fieldConfig['searchFieldName']] = fieldConfig['transformerFunction'] ? tranformValueBeforeSubmittingToElasticsearch(val, fieldConfig['transformerFunction']) : val;
                 else
-                    document[fti[k]] = val;
+                    document[fti[k]] = fieldConfig['transformerFunction'] ? tranformValueBeforeSubmittingToElasticsearch(val, fieldConfig['transformerFunction']) : val;
             }
         }
         return document;
