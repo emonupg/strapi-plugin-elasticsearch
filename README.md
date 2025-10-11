@@ -170,11 +170,9 @@ Note: Indexing of `relations` attributes isn't yet supported.
 ## Transforming data before indexing
 To modify the data stored within Strapi before it is submitted by the plugin for indexing, transformer functions can be setup.
 
-1. Define all the transformer functions within `src/extensions/elasticsearch/strapi-server.ts` as following (it is vital for the transformer function to return the transformed data):
+1. Define all the transformer functions within `src/extensions/elasticsearch/strapi-server.ts` as exhibited in the following example (it is vital for the transformer function to return the transformed data):
 
 ```JavaScript
-import { markdownToTxt } from 'markdown-to-txt';
-
 export default (plugin) => {
     plugin.config.transformers = {
         capitalize: (value: string) => {
@@ -184,7 +182,7 @@ export default (plugin) => {
             return markdownToTxt(value);
         },
         roundFloatValue: (value: number) => {
-            return value.toFixed(2);
+            return Number(value.toFixed(2));
         }
     };
     return plugin;
