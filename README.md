@@ -20,6 +20,9 @@ yarn add @geeky-biz/strapi-plugin-elasticsearch
 
 The latest version of this plugin works for Strapi v5. For Strapi v4, please install the version 0.0.8 of this plugin.
 
+## Supported ElasticSearch version
+The plugin is expected to work with ElasticSearch v8. It may or may not function as expected with ElasticSearch v7 or v9. Please share your findings if you have tried the plugin with these ElasticSearch versions.
+
 ## Plugin Configuration
 
 Within your Strapi project's `config/plugin.js`, enable the plugin and provide the configuration details:
