@@ -24,7 +24,7 @@ module.exports = ({ strapi }) => ({
     if (!strapi.elasticsearch)
       strapi.elasticsearch = {}
     strapi.elasticsearch.collectionsconfig = await this.getCollectionsConfiguredForIndexing();
-    strapi.elasticsearch.collections = await this.getCollectionsConfiguredForIndexing();  
+    strapi.elasticsearch.collections = await this.getCollectionsConfiguredForIndexing();
   },
   async getCollectionConfig({collectionName}) {
     const contentConfig = await this.getContentConfig();
@@ -61,7 +61,8 @@ module.exports = ({ strapi }) => ({
     return collectionsToIndex.includes(collectionName);
   },
   async getContentConfig() {
-    const fieldsToExclude = ['createdAt', 'createdBy', 'publishedAt', 'publishedBy', 'updatedAt', 'updatedBy']
+    // const fieldsToExclude = ['createdAt', 'createdBy', 'publishedAt', 'publishedBy', 'updatedAt', 'updatedBy']
+    const fieldsToExclude = []
     const pluginStore = getPluginStore();
     const settings = await pluginStore.get({ key: 'configsettings' });
     const contentTypes = strapi.contentTypes;
@@ -74,7 +75,7 @@ module.exports = ({ strapi }) => ({
       const listOfAttributes = Object.keys(collectionAttributes).filter(
         (i) => fieldsToExclude.includes(i) === false
       );
-      
+
       for (let k = 0; k < listOfAttributes.length; k++)
       {
         const currentAttribute = listOfAttributes[k];
@@ -90,7 +91,7 @@ module.exports = ({ strapi }) => ({
         apiContentConfig[apiContentTypes[r]][listOfAttributes[k]] = {index: false,
             type: attributeType}
       }
-        
+
     }
     if (settings)
     {
@@ -107,20 +108,20 @@ module.exports = ({ strapi }) => ({
             {
               if (!Object.keys(objSettings['contentConfig'][collections[r]]).includes(attribsForCollection[s]))
               {
-                objSettings['contentConfig'][collections[r]][attribsForCollection[s]] = {index: false, 
+                objSettings['contentConfig'][collections[r]][attribsForCollection[s]] = {index: false,
                   type: apiContentConfig[collections[r]][attribsForCollection[s]].type}
               }
-              else 
+              else
               {
                 if (!Object.keys(objSettings['contentConfig'][collections[r]][attribsForCollection[s]]).includes('type'))
                   objSettings['contentConfig'][collections[r]][attribsForCollection[s]]['type'] = apiContentConfig[collections[r]][attribsForCollection[s]].type
-              } 
+              }
             }
           }
           else
             objSettings['contentConfig'][collections[r]] = apiContentConfig[collections[r]]
         }
-        return objSettings['contentConfig'];  
+        return objSettings['contentConfig'];
       }
       else
         return apiContentConfig
@@ -141,11 +142,11 @@ module.exports = ({ strapi }) => ({
       const stringifySettings = JSON.stringify(objSettings);
       await pluginStore.set({ key: 'configsettings', value : stringifySettings });
     }
-    else 
+    else
     {
       const newSettings =  JSON.stringify({'contentConfig' : config})
       await pluginStore.set({ key: 'configsettings', value : newSettings});
-    }    
+    }
     const updatedSettings = await pluginStore.get({ key: 'configsettings' });
     await this.cacheConfig();
     if (updatedSettings && Object.keys(updatedSettings).includes('contentConfig'))
@@ -172,11 +173,11 @@ module.exports = ({ strapi }) => ({
       const stringifySettings = JSON.stringify(objSettings);
       await pluginStore.set({ key: 'configsettings', value : stringifySettings });
     }
-    else 
+    else
     {
       const newSettings =  JSON.stringify({'contentConfig' : config})
       await pluginStore.set({ key: 'configsettings', value : newSettings});
-    }    
+    }
     const updatedSettings = await pluginStore.get({ key: 'configsettings' });
     await this.cacheConfig();
     if (updatedSettings && Object.keys(updatedSettings).includes('contentConfig'))

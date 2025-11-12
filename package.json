@@ -7,12 +7,12 @@
   "repository": {
        "type": "git",
        "url": "git://github.com/geeky-biz/strapi-plugin-elasticsearch.git"
-  },  
+  },
   "maintainers": [
      {
        "name": "Punit Sethi",
        "email": "punit@tezify.com",
-       "url": "https://punits.dev"  
+       "url": "https://punits.dev"
      }
   ],
   "engines": {
@@ -41,6 +41,7 @@
     "dist"
   ],
   "scripts": {
+    "prepare": "npm run build",
     "build": "strapi-plugin build",
     "watch": "strapi-plugin watch",
     "watch:link": "strapi-plugin watch:link",
