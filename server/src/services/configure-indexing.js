@@ -61,7 +61,8 @@ module.exports = ({ strapi }) => ({
     return collectionsToIndex.includes(collectionName);
   },
   async getContentConfig() {
-    const fieldsToExclude = ['createdAt', 'createdBy', 'publishedAt', 'publishedBy', 'updatedAt', 'updatedBy']
+    const pluginConfig = await strapi.config.get('plugin::elasticsearch');
+    const fieldsToExclude = typeof pluginConfig.allowIndexingMetadataFields == 'boolean' &&  pluginConfig.allowIndexingMetadataFields == true ? [] : ['createdAt', 'createdBy', 'publishedAt', 'publishedBy', 'updatedAt', 'updatedBy']
     const pluginStore = getPluginStore();
     const settings = await pluginStore.get({ key: 'configsettings' });
     const contentTypes = strapi.contentTypes;

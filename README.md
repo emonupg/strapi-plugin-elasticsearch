@@ -170,6 +170,29 @@ The subfields JSON also supports multiple level of nesting:
 ```
 Note: Indexing of `relations` attributes isn't yet supported.
 
+## Indexing of metadata fields
+By default, the plugin excludes indexing the following metadata fields:
+```
+['createdAt', 'createdBy', 'publishedAt', 'publishedBy', 'updatedAt', 'updatedBy']
+```
+This means, these metadata fields do not appear in the `Configure Collections` view to set them up for indexing. To allow indexing these fields, `allowIndexingMetadataFields : true` needs to be specified in the plugin configuration.
+
+```
+module.exports = {
+    // ...
+    'elasticsearch': {
+      enabled: true,
+      config: {
+          // ...
+          allowIndexingMetadataFields: true,
+      }  
+    },
+    // ...
+  }
+```
+
+With the above plugin configuration, the metadata fields become available to be selected for indexing.
+
 ## Transforming data before indexing
 To modify the data stored within Strapi before it is submitted by the plugin for indexing, transformer functions can be setup.
 
