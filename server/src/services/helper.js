@@ -82,7 +82,7 @@ const getPopulateObjectForComponent = (componentUid) => {
     }
     return { populate };
   }
-  
+
 const getPopulateForACollection = (collectionUid) => {
     const collection = strapi.plugin('content-manager').service('content-types').findAllContentTypes().filter(c => c.uid === collectionUid)[0];
     const selCollAttributes = collection.attributes;
@@ -104,15 +104,17 @@ const getPopulateForACollection = (collectionUid) => {
         populate[attributeName] = { fields: ['*'] };
       }
       else if (attribute.type === 'relation') {
-        //do nothing since we currently don't support working with relations
+        populate[attributeName] = { fields: ['*'] };
+        // 将 relation 字段也添加到 fields 数组中
+        fields.push(attributeName);
       }
       else
       {
         fields.push(attributeName);
       }
     }
-    return { populate, fields };  
-  
+    return { populate, fields };
+
 };
 
 /*
@@ -122,7 +124,7 @@ const getPopulateForACollection = (collectionUid) => {
                 'sections' : { index: true, searchFieldName: 'information',
                     'subfields' : [
                         { 'component' : 'try.paragraph',
-                            'field' : 'Text'}, 
+                            'field' : 'Text'},
                         { 'component' : 'try.paragraph',
                             'field' : 'Heading'},
                         { 'component' : 'try.footer',
@@ -130,7 +132,7 @@ const getPopulateForACollection = (collectionUid) => {
                             'subfields' :[ {
                                 'component' : 'try.link',
                                 'field' : 'display_text'
-                            }] 
+                            }]
                         }] },
                 'seo_details' : {
                     index: true, searchFieldName: 'seo',
@@ -151,7 +153,7 @@ const getPopulateForACollection = (collectionUid) => {
                     ]
                 }
             }
-*/            
+*/
 function extractSubfieldData({config, data }) {
     let returnData = '';
     if (data === null)
@@ -182,7 +184,7 @@ function extractSubfieldData({config, data }) {
                         Object.keys(conf).includes('subfields'))
                     {
                         returnData = returnData + '\n' + extractSubfieldData({
-                            config: conf['subfields'], data: extractItem[conf['field']]}); 
+                            config: conf['subfields'], data: extractItem[conf['field']]});
                     }
                 }
                 else
@@ -200,7 +202,7 @@ function extractSubfieldData({config, data }) {
                     else if (Object.keys(conf).includes('subfields'))
                     {
                         returnData = returnData + '\n' + extractSubfieldData({
-                            config: conf['subfields'], data: extractItem[conf['field']]}); 
+                            config: conf['subfields'], data: extractItem[conf['field']]});
                     }
                 }
             }
@@ -218,11 +220,11 @@ function extractSubfieldData({config, data }) {
             else if (Object.keys(conf).includes('subfields'))
             {
                 returnData = returnData + '\n' + extractSubfieldData({
-                    config: conf['subfields'], data: data[conf['field']]}); 
+                    config: conf['subfields'], data: data[conf['field']]});
             }
         }
     }
-    return returnData;    
+    return returnData;
 }
 
 const tranformValueBeforeSubmittingToElasticsearch = (val, transformerFunctionName) => {
@@ -231,7 +233,7 @@ const tranformValueBeforeSubmittingToElasticsearch = (val, transformerFunctionNa
     const transformerFunction = transformerFunctionsList[transformerFunctionName];
     return transformerFunction(val);
   }
-  else 
+  else
     return val;
 }
 
@@ -240,17 +242,17 @@ module.exports = ({ strapi }) => ({
         const configureService = strapi.plugins['elasticsearch'].services.configureIndexing;
         const esInterface = strapi.plugins['elasticsearch'].services.esInterface;
         const pluginConfig = await strapi.config.get('plugin::elasticsearch');
-      
+
         const connected = pluginConfig.searchConnector && pluginConfig.searchConnector.host
          ? await esInterface.checkESConnection() : false;
 
         return {
             indexingCronSchedule : pluginConfig.indexingCronSchedule || "Not configured",
-            elasticHost : pluginConfig.searchConnector ? 
+            elasticHost : pluginConfig.searchConnector ?
                             pluginConfig.searchConnector.host || "Not configured" : "Not configured",
-            elasticUserName : pluginConfig.searchConnector ? 
+            elasticUserName : pluginConfig.searchConnector ?
                             pluginConfig.searchConnector.username || "Not configured" : "Not configured",
-            elasticCertificate : pluginConfig.searchConnector ? 
+            elasticCertificate : pluginConfig.searchConnector ?
             pluginConfig.searchConnector.certificate || "Not configured" : "Not configured",
             elasticIndexAlias : pluginConfig.indexAliasName || "Not configured",
             connected : connected,
@@ -299,12 +301,12 @@ module.exports = ({ strapi }) => ({
         {
             const objSettings = JSON.parse(settings);
             objSettings['indexConfig'] = {'name' : indexName};
-            await pluginStore.set({ key: 'configsettings', value : JSON.stringify(objSettings)});      
+            await pluginStore.set({ key: 'configsettings', value : JSON.stringify(objSettings)});
         }
         else
         {
             const newSettings =  JSON.stringify({'indexConfig' : {'name' : indexName}})
-            await pluginStore.set({ key: 'configsettings', value : newSettings});      
+            await pluginStore.set({ key: 'configsettings', value : newSettings});
         }
     },
     modifySubfieldsConfigForExtractor(collectionConfig) {
@@ -351,11 +353,11 @@ module.exports = ({ strapi }) => ({
                 else
                 {
                     val = data[fti[k]];
-                    if (Object.keys(fieldConfig).includes('transform') && 
+                    if (Object.keys(fieldConfig).includes('transform') &&
                         fieldConfig['transform'] === 'markdown')
                         val = transformServiceProvider.transform({content: val, from: 'markdown'});
                 }
-                    
+
                 if (Object.keys(fieldConfig).includes('searchFieldName'))
                     document[fieldConfig['searchFieldName']] = fieldConfig['transformerFunction'] ? tranformValueBeforeSubmittingToElasticsearch(val, fieldConfig['transformerFunction']) : val;
                 else
@@ -363,5 +365,5 @@ module.exports = ({ strapi }) => ({
             }
         }
         return document;
-    }    
+    }
 });
