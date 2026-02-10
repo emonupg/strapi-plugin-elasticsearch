@@ -7,19 +7,19 @@
   "repository": {
        "type": "git",
        "url": "git://github.com/geeky-biz/strapi-plugin-elasticsearch.git"
-  },  
+  },
   "maintainers": [
      {
        "name": "Punit Sethi",
        "email": "punit@tezify.com",
-       "url": "https://punits.dev"  
+       "url": "https://punits.dev"
      }
   ],
   "engines": {
      "node": ">=18.0.0 <=22.x.x",
      "npm": ">=6.0.0"
   },
-  "version": "0.0.13",
+  "version": "0.0.14",
   "keywords": [],
   "type": "commonjs",
   "exports": {
@@ -42,6 +42,7 @@
   ],
   "scripts": {
     "build": "strapi-plugin build",
+    "prepare": "npm run build",
     "watch": "strapi-plugin watch",
     "watch:link": "strapi-plugin watch:link",
     "verify": "strapi-plugin verify"

@@ -7,6 +7,7 @@ const indexer = require('./perform-indexing');
 const logIndexing = require('./log-indexing');
 const helper = require('./helper');
 const transformContent = require('./transform-content');
+const rebuildValidator = require('./rebuild-validator');
 
 module.exports = {
   configureIndexing,
@@ -15,5 +16,6 @@ module.exports = {
   indexer,
   logIndexing,
   helper,
-  transformContent
+  transformContent,
+  rebuildValidator,
 };

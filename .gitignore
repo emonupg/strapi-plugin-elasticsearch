@@ -136,3 +136,7 @@ yarn-error.log
 ############################
 
 coverage
+
+AGENTS.md
+CLAUDE.md
+TESTING.md

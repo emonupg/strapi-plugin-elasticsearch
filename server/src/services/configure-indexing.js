@@ -6,183 +6,201 @@ const getPluginStore = () => {
     type: 'plugin',
     name: 'elasticsearch',
   });
-}
+};
 
 module.exports = ({ strapi }) => ({
   async initializeStrapiElasticsearch() {
+    await this.cleanupDeletedCollections();
     await this.cacheConfig();
   },
+  async cleanupDeletedCollections() {
+    const pluginStore = getPluginStore();
+    const settings = await pluginStore.get({ key: 'configsettings' });
+
+    if (!settings) {
+      return;
+    }
+
+    const objSettings = JSON.parse(settings);
+    if (!Object.keys(objSettings).includes('contentConfig')) {
+      return;
+    }
+
+    const contentTypes = strapi.contentTypes;
+    const apiContentTypes = Object.keys(contentTypes).filter((c) => c.includes('api::'));
+    const savedCollections = Object.keys(objSettings['contentConfig']);
+
+    let hasChanges = false;
+    for (let i = savedCollections.length - 1; i >= 0; i--) {
+      const collectionName = savedCollections[i];
+      if (!apiContentTypes.includes(collectionName)) {
+        console.log(
+          `strapi-plugin-elasticsearch : Removing deleted collection from config: ${collectionName}`
+        );
+        delete objSettings['contentConfig'][collectionName];
+        hasChanges = true;
+      }
+    }
+
+    if (hasChanges) {
+      const stringifySettings = JSON.stringify(objSettings);
+      await pluginStore.set({ key: 'configsettings', value: stringifySettings });
+      console.log('strapi-plugin-elasticsearch : Cleanup completed');
+    }
+  },
   async markInitialized() {
-    if (!strapi.elasticsearch)
-      strapi.elasticsearch = {}
+    if (!strapi.elasticsearch) strapi.elasticsearch = {};
     strapi.elasticsearch.initialized = true;
   },
   isInitialized() {
-    return strapi.elasticsearch?.initialized || false
+    return strapi.elasticsearch?.initialized || false;
   },
   async cacheConfig() {
-    if (!strapi.elasticsearch)
-      strapi.elasticsearch = {}
+    if (!strapi.elasticsearch) strapi.elasticsearch = {};
     strapi.elasticsearch.collectionsconfig = await this.getCollectionsConfiguredForIndexing();
-    strapi.elasticsearch.collections = await this.getCollectionsConfiguredForIndexing();  
+    strapi.elasticsearch.collections = await this.getCollectionsConfiguredForIndexing();
   },
-  async getCollectionConfig({collectionName}) {
+  async getCollectionConfig({ collectionName }) {
     const contentConfig = await this.getContentConfig();
-    if (Object.keys(contentConfig).includes(collectionName))
-    {
-      const ob = {}
+    if (Object.keys(contentConfig).includes(collectionName)) {
+      const ob = {};
       ob[collectionName] = contentConfig[collectionName];
       return ob;
-    }
-    else
-      return null;
+    } else return null;
   },
   async getCollectionsConfiguredForIndexing() {
     const contentConfig = await this.getContentConfig();
     if (contentConfig)
       return Object.keys(contentConfig).filter((i) => {
         let hasAtleastOneIndexableAttribute = false;
-        const attribs = Object.keys(contentConfig[i])
-        for (let k=0; k<attribs.length; k++)
-        {
-          if (contentConfig[i][attribs[k]]['index'] === true)
-          {
+        const attribs = Object.keys(contentConfig[i]);
+        for (let k = 0; k < attribs.length; k++) {
+          if (contentConfig[i][attribs[k]]['index'] === true) {
             hasAtleastOneIndexableAttribute = true;
             break;
           }
         }
         return hasAtleastOneIndexableAttribute;
-      })
-    else
-      return [];
+      });
+    else return [];
   },
-  async isCollectionConfiguredToBeIndexed({collectionName}) {
+  async isCollectionConfiguredToBeIndexed({ collectionName }) {
     const collectionsToIndex = await this.getCollectionsConfiguredForIndexing();
     return collectionsToIndex.includes(collectionName);
   },
   async getContentConfig() {
     const pluginConfig = await strapi.config.get('plugin::elasticsearch');
-    const fieldsToExclude = typeof pluginConfig.allowIndexingMetadataFields == 'boolean' &&  pluginConfig.allowIndexingMetadataFields == true ? [] : ['createdAt', 'createdBy', 'publishedAt', 'publishedBy', 'updatedAt', 'updatedBy']
+    const fieldsToExclude =
+      typeof pluginConfig.allowIndexingMetadataFields == 'boolean' &&
+      pluginConfig.allowIndexingMetadataFields == true
+        ? []
+        : ['createdAt', 'createdBy', 'publishedAt', 'publishedBy', 'updatedAt', 'updatedBy'];
     const pluginStore = getPluginStore();
     const settings = await pluginStore.get({ key: 'configsettings' });
     const contentTypes = strapi.contentTypes;
     const apiContentTypes = Object.keys(contentTypes).filter((c) => c.includes('api::'));
     const apiContentConfig = {};
-    for (let r = 0; r < apiContentTypes.length; r++)
-    {
+    for (let r = 0; r < apiContentTypes.length; r++) {
       apiContentConfig[apiContentTypes[r]] = {};
-      const collectionAttributes = contentTypes[apiContentTypes[r]].attributes
+      const collectionAttributes = contentTypes[apiContentTypes[r]].attributes;
       const listOfAttributes = Object.keys(collectionAttributes).filter(
         (i) => fieldsToExclude.includes(i) === false
       );
-      
-      for (let k = 0; k < listOfAttributes.length; k++)
-      {
+
+      for (let k = 0; k < listOfAttributes.length; k++) {
         const currentAttribute = listOfAttributes[k];
-        let attributeType = "regular";
-        if (typeof collectionAttributes[currentAttribute]["type"] !== "undefined"
-          && collectionAttributes[currentAttribute]["type"] !== null)
-          {
-            if (collectionAttributes[currentAttribute]["type"] === "component")
-              attributeType = "component"
-            else if (collectionAttributes[currentAttribute]["type"] === "dynamiczone")
-              attributeType = "dynamiczone"
-          }
-        apiContentConfig[apiContentTypes[r]][listOfAttributes[k]] = {index: false,
-            type: attributeType}
-      }
-        
-    }
-    if (settings)
-    {
-      const objSettings = JSON.parse(settings);
-      if (Object.keys(objSettings).includes('contentConfig'))
-      {
-        const collections = Object.keys(apiContentConfig);
-        for (let r=0; r< collections.length; r++)
-        {
-          if (Object.keys(objSettings['contentConfig']).includes(collections[r]))
-          {
-            const attribsForCollection = Object.keys(apiContentConfig[collections[r]])
-            for (let s = 0; s < attribsForCollection.length; s++)
-            {
-              if (!Object.keys(objSettings['contentConfig'][collections[r]]).includes(attribsForCollection[s]))
-              {
-                objSettings['contentConfig'][collections[r]][attribsForCollection[s]] = {index: false, 
-                  type: apiContentConfig[collections[r]][attribsForCollection[s]].type}
-              }
-              else 
-              {
-                if (!Object.keys(objSettings['contentConfig'][collections[r]][attribsForCollection[s]]).includes('type'))
-                  objSettings['contentConfig'][collections[r]][attribsForCollection[s]]['type'] = apiContentConfig[collections[r]][attribsForCollection[s]].type
-              } 
-            }
-          }
-          else
-            objSettings['contentConfig'][collections[r]] = apiContentConfig[collections[r]]
+        let attributeType = 'regular';
+        if (
+          typeof collectionAttributes[currentAttribute]['type'] !== 'undefined' &&
+          collectionAttributes[currentAttribute]['type'] !== null
+        ) {
+          if (collectionAttributes[currentAttribute]['type'] === 'component')
+            attributeType = 'component';
+          else if (collectionAttributes[currentAttribute]['type'] === 'dynamiczone')
+            attributeType = 'dynamiczone';
         }
-        return objSettings['contentConfig'];  
+        apiContentConfig[apiContentTypes[r]][listOfAttributes[k]] = {
+          index: false,
+          type: attributeType,
+        };
       }
-      else
-        return apiContentConfig
     }
-    else
-      return apiContentConfig;
+    if (settings) {
+      const objSettings = JSON.parse(settings);
+      if (Object.keys(objSettings).includes('contentConfig')) {
+        const collections = Object.keys(apiContentConfig);
+        for (let r = 0; r < collections.length; r++) {
+          if (Object.keys(objSettings['contentConfig']).includes(collections[r])) {
+            const attribsForCollection = Object.keys(apiContentConfig[collections[r]]);
+            for (let s = 0; s < attribsForCollection.length; s++) {
+              if (
+                !Object.keys(objSettings['contentConfig'][collections[r]]).includes(
+                  attribsForCollection[s]
+                )
+              ) {
+                objSettings['contentConfig'][collections[r]][attribsForCollection[s]] = {
+                  index: false,
+                  type: apiContentConfig[collections[r]][attribsForCollection[s]].type,
+                };
+              } else {
+                if (
+                  !Object.keys(
+                    objSettings['contentConfig'][collections[r]][attribsForCollection[s]]
+                  ).includes('type')
+                )
+                  objSettings['contentConfig'][collections[r]][attribsForCollection[s]]['type'] =
+                    apiContentConfig[collections[r]][attribsForCollection[s]].type;
+              }
+            }
+          } else objSettings['contentConfig'][collections[r]] = apiContentConfig[collections[r]];
+        }
+        return objSettings['contentConfig'];
+      } else return apiContentConfig;
+    } else return apiContentConfig;
   },
   getTransformers() {
     return Object.keys(strapi.plugins['elasticsearch'].config('transformers') || {});
   },
-  async importContentConfig({config}){
+  async importContentConfig({ config }) {
     const pluginStore = getPluginStore();
     const settings = await pluginStore.get({ key: 'configsettings' });
-    if (settings)
-    {
+    if (settings) {
       const objSettings = JSON.parse(settings);
-      objSettings['contentConfig'] = JSON.parse(config)
+      objSettings['contentConfig'] = JSON.parse(config);
       const stringifySettings = JSON.stringify(objSettings);
-      await pluginStore.set({ key: 'configsettings', value : stringifySettings });
+      await pluginStore.set({ key: 'configsettings', value: stringifySettings });
+    } else {
+      const newSettings = JSON.stringify({ contentConfig: config });
+      await pluginStore.set({ key: 'configsettings', value: newSettings });
     }
-    else 
-    {
-      const newSettings =  JSON.stringify({'contentConfig' : config})
-      await pluginStore.set({ key: 'configsettings', value : newSettings});
-    }    
     const updatedSettings = await pluginStore.get({ key: 'configsettings' });
     await this.cacheConfig();
     if (updatedSettings && Object.keys(updatedSettings).includes('contentConfig'))
-      return updatedSettings['contentConfig']
-    else
-      return {};
+      return updatedSettings['contentConfig'];
+    else return {};
   },
-  async setContentConfig({collection, config}){
+  async setContentConfig({ collection, config }) {
     const pluginStore = getPluginStore();
     const settings = await pluginStore.get({ key: 'configsettings' });
-    if (settings)
-    {
+    if (settings) {
       const objSettings = JSON.parse(settings);
-      if (Object.keys(objSettings).includes('contentConfig'))
-      {
+      if (Object.keys(objSettings).includes('contentConfig')) {
         const prevConfig = objSettings['contentConfig'];
         const changedConfigKey = Object.keys(config)[0];
         const newConfig = prevConfig;
-        newConfig[changedConfigKey] = config[changedConfigKey]
-        objSettings['contentConfig'] = newConfig
-      }
-      else
-        objSettings['contentConfig'] = config;
+        newConfig[changedConfigKey] = config[changedConfigKey];
+        objSettings['contentConfig'] = newConfig;
+      } else objSettings['contentConfig'] = config;
       const stringifySettings = JSON.stringify(objSettings);
-      await pluginStore.set({ key: 'configsettings', value : stringifySettings });
+      await pluginStore.set({ key: 'configsettings', value: stringifySettings });
+    } else {
+      const newSettings = JSON.stringify({ contentConfig: config });
+      await pluginStore.set({ key: 'configsettings', value: newSettings });
     }
-    else 
-    {
-      const newSettings =  JSON.stringify({'contentConfig' : config})
-      await pluginStore.set({ key: 'configsettings', value : newSettings});
-    }    
     const updatedSettings = await pluginStore.get({ key: 'configsettings' });
     await this.cacheConfig();
     if (updatedSettings && Object.keys(updatedSettings).includes('contentConfig'))
-      return updatedSettings['contentConfig']
-    else
-      return {};
+      return updatedSettings['contentConfig'];
+    else return {};
   },
 });
