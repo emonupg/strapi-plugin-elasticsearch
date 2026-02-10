@@ -309,7 +309,8 @@ module.exports = ({ strapi }) => ({
     if (settings && settings.indexConfig && settings.indexConfig[collectionName]) {
       return settings.indexConfig[collectionName].currentIndex;
     }
-    const shortName = collectionName.replace(/^api::/, '').replace(/\./g, '-');
+    // Extract the last part after the final dot (e.g., api::literature.literature -> literature)
+    const shortName = collectionName.split('.').pop();
     return `strapi-plugin-${shortName}-index_001`;
   },
   async getIncrementedIndexName(collectionName) {
@@ -329,7 +330,8 @@ module.exports = ({ strapi }) => ({
     if (!collectionName) {
       throw new Error('collectionName is required for getIndexAlias');
     }
-    const shortName = collectionName.replace(/^api::/, '').replace(/\./g, '-');
+    // Extract the last part after the final dot (e.g., api::literature.literature -> literature)
+    const shortName = collectionName.split('.').pop();
     return `strapi-alias-${shortName}`;
   },
   getGlobalSearchAlias() {
