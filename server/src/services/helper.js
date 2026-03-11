@@ -122,6 +122,53 @@ const getPopulateForACollection = (collectionUid) => {
   return { populate, fields };
 };
 
+/**
+ * Same as getPopulateForACollection but excludes relation-type fields.
+ * Used during bulk rebuild (indexCollection) to avoid PostgreSQL bind-parameter overflow
+ * when collections have large relation sets (e.g. >100k related records whose IDs would
+ * all appear in a single WHERE IN (...) clause, exceeding the 65535 parameter limit).
+ * Relations are not indexable fields per plugin convention, so omitting them is safe.
+ */
+const getPopulateForACollectionNoRelations = (collectionUid) => {
+  const collection = strapi
+    .plugin('content-manager')
+    .service('content-types')
+    .findAllContentTypes()
+    .filter((c) => c.uid === collectionUid)[0];
+
+  if (!collection) {
+    console.log(
+      `strapi-plugin-elasticsearch : Collection ${collectionUid} not found in content-manager`
+    );
+    return { populate: {}, fields: [] };
+  }
+
+  const selCollAttributes = collection.attributes;
+  const populate = {};
+  const fields = [];
+  for (const attributeName of Object.keys(selCollAttributes)) {
+    const attribute = selCollAttributes[attributeName];
+    if (attribute.type === 'dynamiczone') {
+      populate[attributeName] = {
+        on: attribute.components.reduce((acc, componentUid) => {
+          acc[componentUid] = getPopulateObjectForComponent(componentUid);
+          return acc;
+        }, {}),
+      };
+    } else if (attribute.type === 'component') {
+      populate[attributeName] = getPopulateObjectForComponent(attribute.component);
+    } else if (attribute.type === 'media') {
+      populate[attributeName] = { fields: ['*'] };
+    }
+    // relation fields are intentionally excluded — they cause PostgreSQL bind-parameter
+    // overflow during bulk queries and are not supported for indexing anyway.
+    else {
+      fields.push(attributeName);
+    }
+  }
+  return { populate, fields };
+};
+
 /*
 //Example config to cover extraction cases
             collectionConfig[collectionName] = {
@@ -287,6 +334,14 @@ module.exports = ({ strapi }) => ({
   },
   getPopulateForACollection({ collectionName }) {
     return getPopulateForACollection(collectionName);
+  },
+  /**
+   * Returns populate config excluding relation-type fields.
+   * Use this for bulk operations (rebuild/indexCollection) to avoid PostgreSQL
+   * bind-parameter overflow when there are large numbers of related records.
+   */
+  getPopulateForACollectionNoRelations({ collectionName }) {
+    return getPopulateForACollectionNoRelations(collectionName);
   },
   getIndexItemId({ collectionName, itemDocumentId }) {
     // For per-content-type indices, we only use the document ID

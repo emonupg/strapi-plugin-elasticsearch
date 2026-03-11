@@ -161,7 +161,9 @@ module.exports = ({ strapi }) => ({
 
   async indexCollection(collectionName, indexName = null) {
     const helper = strapi.plugins['elasticsearch'].services.helper;
-    const populateAttrib = helper.getPopulateForACollection({ collectionName });
+    // Use no-relations populate to avoid PostgreSQL bind-parameter overflow (>65535 params)
+    // when collections have large relation sets during bulk rebuild.
+    const populateAttrib = helper.getPopulateForACollectionNoRelations({ collectionName });
     const isCollectionDraftPublish = helper.isCollectionDraftPublish({ collectionName });
     const configureIndexingService = strapi.plugins['elasticsearch'].services.configureIndexing;
     const esInterface = strapi.plugins['elasticsearch'].services.esInterface;
