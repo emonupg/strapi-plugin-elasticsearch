@@ -9,6 +9,39 @@ const getPluginStore = () => {
 };
 
 module.exports = ({ strapi }) => ({
+  getCollectionSettings({ collectionConfig, collectionName }) {
+    const collectionData = collectionConfig?.[collectionName];
+    if (!collectionData || typeof collectionData !== 'object' || Array.isArray(collectionData)) {
+      return {};
+    }
+
+    const settings = collectionData._collectionSettings;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return {};
+    }
+
+    return settings;
+  },
+  getSyncFilterField({ collectionConfig, collectionName }) {
+    const settings = this.getCollectionSettings({ collectionConfig, collectionName });
+    if (!settings.syncFilterField) {
+      return null;
+    }
+
+    const model = strapi.getModel(collectionName);
+    if (!model || !model.attributes) {
+      return null;
+    }
+
+    const configuredField = settings.syncFilterField;
+    const configuredFieldSchema = model.attributes[configuredField];
+
+    if (!configuredFieldSchema || configuredFieldSchema.type !== 'boolean') {
+      return null;
+    }
+
+    return configuredField;
+  },
   async initializeStrapiElasticsearch() {
     await this.cleanupDeletedCollections();
     await this.cacheConfig();
@@ -73,9 +106,9 @@ module.exports = ({ strapi }) => ({
     if (contentConfig)
       return Object.keys(contentConfig).filter((i) => {
         let hasAtleastOneIndexableAttribute = false;
-        const attribs = Object.keys(contentConfig[i]);
+        const attribs = Object.keys(contentConfig[i]).filter((attr) => !attr.startsWith('_'));
         for (let k = 0; k < attribs.length; k++) {
-          if (contentConfig[i][attribs[k]]['index'] === true) {
+          if (contentConfig[i][attribs[k]]?.index === true) {
             hasAtleastOneIndexableAttribute = true;
             break;
           }
@@ -91,8 +124,8 @@ module.exports = ({ strapi }) => ({
   async getContentConfig() {
     const pluginConfig = await strapi.config.get('plugin::elasticsearch');
     const fieldsToExclude =
-      typeof pluginConfig.allowIndexingMetadataFields == 'boolean' &&
-      pluginConfig.allowIndexingMetadataFields == true
+      typeof pluginConfig.allowIndexingMetadataFields === 'boolean' &&
+      pluginConfig.allowIndexingMetadataFields === true
         ? []
         : ['createdAt', 'createdBy', 'publishedAt', 'publishedBy', 'updatedAt', 'updatedBy'];
     const pluginStore = getPluginStore();
@@ -109,16 +142,11 @@ module.exports = ({ strapi }) => ({
 
       for (let k = 0; k < listOfAttributes.length; k++) {
         const currentAttribute = listOfAttributes[k];
+        const currentAttributeSchemaType = collectionAttributes[currentAttribute]?.type;
         let attributeType = 'regular';
-        if (
-          typeof collectionAttributes[currentAttribute]['type'] !== 'undefined' &&
-          collectionAttributes[currentAttribute]['type'] !== null
-        ) {
-          if (collectionAttributes[currentAttribute]['type'] === 'component')
-            attributeType = 'component';
-          else if (collectionAttributes[currentAttribute]['type'] === 'dynamiczone')
-            attributeType = 'dynamiczone';
-        }
+        if (currentAttributeSchemaType === 'component') attributeType = 'component';
+        else if (currentAttributeSchemaType === 'dynamiczone') attributeType = 'dynamiczone';
+        else if (currentAttributeSchemaType === 'boolean') attributeType = 'boolean';
         apiContentConfig[apiContentTypes[r]][listOfAttributes[k]] = {
           index: false,
           type: attributeType,
@@ -143,13 +171,9 @@ module.exports = ({ strapi }) => ({
                   type: apiContentConfig[collections[r]][attribsForCollection[s]].type,
                 };
               } else {
-                if (
-                  !Object.keys(
-                    objSettings['contentConfig'][collections[r]][attribsForCollection[s]]
-                  ).includes('type')
-                )
-                  objSettings['contentConfig'][collections[r]][attribsForCollection[s]]['type'] =
-                    apiContentConfig[collections[r]][attribsForCollection[s]].type;
+                const expectedType = apiContentConfig[collections[r]][attribsForCollection[s]].type;
+                objSettings['contentConfig'][collections[r]][attribsForCollection[s]]['type'] =
+                  expectedType;
               }
             }
           } else objSettings['contentConfig'][collections[r]] = apiContentConfig[collections[r]];

@@ -19,16 +19,24 @@ module.exports = async ({ strapi }) => {
       );
     else {
       const connector = pluginConfig['searchConnector'];
+      console.log(
+        'strapi-plugin-elasticsearch : Indexing cron schedule configured as',
+        pluginConfig['indexingCronSchedule']
+      );
       await esInterface.initializeSearchEngine({
         host: connector.host,
         uname: connector.username,
         password: connector.password,
         cert: connector.certificate,
+        requestTimeout: connector.requestTimeout,
+        maxRetries: connector.maxRetries,
       });
       strapi.cron.add({
         elasticsearchIndexing: {
           task: async ({ strapi }) => {
+            console.log('strapi-plugin-elasticsearch : Cron triggered indexPendingData run');
             await indexer.indexPendingData();
+            console.log('strapi-plugin-elasticsearch : Cron finished indexPendingData run');
           },
           options: {
             rule: pluginConfig['indexingCronSchedule'],

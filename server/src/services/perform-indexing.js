@@ -1,3 +1,11 @@
+const stringifyForLog = (value) => {
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    return JSON.stringify({ message: 'Unable to stringify log payload', error: err?.message });
+  }
+};
+
 module.exports = ({ strapi }) => ({
   async rebuildCollectionIndex(collectionName) {
     const helper = strapi.plugins['elasticsearch'].services.helper;
@@ -157,33 +165,71 @@ module.exports = ({ strapi }) => ({
     const isCollectionDraftPublish = helper.isCollectionDraftPublish({ collectionName });
     const configureIndexingService = strapi.plugins['elasticsearch'].services.configureIndexing;
     const esInterface = strapi.plugins['elasticsearch'].services.esInterface;
+    const pageSize = 1000;
 
     if (indexName === null) {
       indexName = await helper.getCurrentIndexName(collectionName);
     }
 
-    let entries = [];
+    const collectionConfig = await configureIndexingService.getCollectionConfig({ collectionName });
+    const syncFilterField = configureIndexingService.getSyncFilterField({
+      collectionConfig,
+      collectionName,
+    });
+
+    const queryParams = {
+      sort: { createdAt: 'DESC' },
+      populate: populateAttrib['populate'],
+    };
+
     if (isCollectionDraftPublish) {
-      entries = await strapi.documents(collectionName).findMany({
-        sort: { createdAt: 'DESC' },
-        populate: populateAttrib['populate'],
-        status: 'published',
-      });
-    } else {
-      entries = await strapi.documents(collectionName).findMany({
-        sort: { createdAt: 'DESC' },
-        populate: populateAttrib['populate'],
-      });
+      queryParams.status = 'published';
     }
-    if (entries) {
+    if (syncFilterField) {
+      queryParams.filters = { [syncFilterField]: true };
+    }
+
+    console.log(
+      'strapi-plugin-elasticsearch : indexCollection start',
+      stringifyForLog({
+        collectionName,
+        indexName,
+        pageSize,
+        isCollectionDraftPublish,
+        syncFilterField,
+        queryParams,
+      })
+    );
+
+    let start = 0;
+    let indexedItems = 0;
+    while (true) {
+      const entries = await strapi.documents(collectionName).findMany({
+        ...queryParams,
+        start,
+        limit: pageSize,
+      });
+
+      console.log(
+        'strapi-plugin-elasticsearch : indexCollection page fetched',
+        stringifyForLog({
+          collectionName,
+          indexName,
+          start,
+          fetched: entries ? entries.length : 0,
+          documentIds: (entries || []).map((entry) => entry.documentId),
+        })
+      );
+
+      if (!entries || entries.length === 0) {
+        break;
+      }
+
       for (let s = 0; s < entries.length; s++) {
         const item = entries[s];
         const indexItemId = helper.getIndexItemId({
           collectionName: collectionName,
           itemDocumentId: item.documentId,
-        });
-        const collectionConfig = await configureIndexingService.getCollectionConfig({
-          collectionName,
         });
         const dataToIndex = await helper.extractDataToIndex({
           collectionName,
@@ -192,19 +238,193 @@ module.exports = ({ strapi }) => ({
         });
         await esInterface.indexDataToSpecificIndex(
           { itemId: indexItemId, itemData: dataToIndex },
-          indexName
+          indexName,
+          { refresh: false }
         );
+        console.log(
+          'strapi-plugin-elasticsearch : indexCollection item indexed',
+          stringifyForLog({
+            collectionName,
+            indexName,
+            itemDocumentId: item.documentId,
+            indexItemId,
+            itemData: dataToIndex,
+          })
+        );
+        indexedItems += 1;
+      }
+
+      start += entries.length;
+      if (entries.length < pageSize) {
+        break;
       }
     }
+
+    if (indexedItems > 0) {
+      await esInterface.refreshIndex(indexName);
+      console.log(
+        'strapi-plugin-elasticsearch : indexCollection refresh complete',
+        stringifyForLog({ collectionName, indexName, indexedItems })
+      );
+    }
+
     return true;
+  },
+  async syncSingleItemNow({
+    collectionName,
+    itemDocumentId,
+    indexingType = 'add-to-index',
+    triggerAction = 'unknown',
+  }) {
+    const configureIndexingService = strapi.plugins['elasticsearch'].services.configureIndexing;
+    const esInterface = strapi.plugins['elasticsearch'].services.esInterface;
+    const helper = strapi.plugins['elasticsearch'].services.helper;
+
+    if (!(await configureIndexingService.isCollectionConfiguredToBeIndexed({ collectionName }))) {
+      console.log(
+        'strapi-plugin-elasticsearch : syncSingleItemNow skipped, collection not configured',
+        stringifyForLog({ collectionName, itemDocumentId, indexingType, triggerAction })
+      );
+      return { status: 'skipped-not-configured' };
+    }
+
+    const collectionConfig = await configureIndexingService.getCollectionConfig({ collectionName });
+    const syncFilterField = configureIndexingService.getSyncFilterField({
+      collectionConfig,
+      collectionName,
+    });
+    const populateAttrib = helper.getPopulateForACollection({ collectionName });
+    const isCollectionDraftPublish = helper.isCollectionDraftPublish({ collectionName });
+    const indexItemId = helper.getIndexItemId({
+      collectionName,
+      itemDocumentId,
+    });
+
+    console.log(
+      'strapi-plugin-elasticsearch : syncSingleItemNow start',
+      stringifyForLog({
+        collectionName,
+        itemDocumentId,
+        indexingType,
+        triggerAction,
+        syncFilterField,
+        isCollectionDraftPublish,
+      })
+    );
+
+    if (indexingType === 'remove-from-index') {
+      await esInterface.removeItemFromIndex({ itemId: indexItemId, collectionName });
+      console.log(
+        'strapi-plugin-elasticsearch : syncSingleItemNow removed from ES due to explicit remove',
+        stringifyForLog({ collectionName, itemDocumentId, indexItemId, triggerAction })
+      );
+      return { status: 'removed-explicit', indexItemId };
+    }
+
+    let item = null;
+    if (isCollectionDraftPublish && syncFilterField) {
+      item = await strapi.documents(collectionName).findOne({
+        documentId: itemDocumentId,
+        populate: populateAttrib['populate'],
+      });
+      console.log(
+        'strapi-plugin-elasticsearch : syncSingleItemNow loaded draft item',
+        stringifyForLog({
+          collectionName,
+          itemDocumentId,
+          syncFilterField,
+          syncFilterValue: item ? item[syncFilterField] : null,
+        })
+      );
+
+      if (!item || item[syncFilterField] !== true) {
+        await esInterface.removeItemFromIndex({ itemId: indexItemId, collectionName });
+        console.log(
+          'strapi-plugin-elasticsearch : syncSingleItemNow removed from ES due to draft filter decision',
+          stringifyForLog({
+            collectionName,
+            itemDocumentId,
+            indexItemId,
+            syncFilterField,
+            syncFilterValue: item ? item[syncFilterField] : null,
+          })
+        );
+        return { status: 'removed-filter', indexItemId };
+      }
+    } else {
+      const findOneParams = {
+        documentId: itemDocumentId,
+        populate: populateAttrib['populate'],
+      };
+
+      if (isCollectionDraftPublish) {
+        findOneParams.status = 'published';
+      }
+
+      item = await strapi.documents(collectionName).findOne(findOneParams);
+      console.log(
+        'strapi-plugin-elasticsearch : syncSingleItemNow loaded item',
+        stringifyForLog({
+          collectionName,
+          itemDocumentId,
+          findOneParams,
+          syncFilterField,
+          syncFilterValue: syncFilterField && item ? item[syncFilterField] : null,
+        })
+      );
+
+      if (!item || (syncFilterField && item[syncFilterField] !== true)) {
+        await esInterface.removeItemFromIndex({ itemId: indexItemId, collectionName });
+        console.log(
+          'strapi-plugin-elasticsearch : syncSingleItemNow removed from ES due to item missing/filter',
+          stringifyForLog({
+            collectionName,
+            itemDocumentId,
+            indexItemId,
+            syncFilterField,
+            syncFilterValue: syncFilterField && item ? item[syncFilterField] : null,
+          })
+        );
+        return { status: 'removed-filter-or-missing', indexItemId };
+      }
+    }
+
+    const dataToIndex = await helper.extractDataToIndex({
+      collectionName,
+      data: item,
+      collectionConfig,
+    });
+    await esInterface.indexData({
+      itemId: indexItemId,
+      itemData: dataToIndex,
+      collectionName,
+    });
+    console.log(
+      'strapi-plugin-elasticsearch : syncSingleItemNow indexed into ES',
+      stringifyForLog({ collectionName, itemDocumentId, indexItemId, indexedData: dataToIndex })
+    );
+
+    return { status: 'indexed', indexItemId };
   },
   async indexPendingData() {
     const scheduleIndexingService = strapi.plugins['elasticsearch'].services.scheduleIndexing;
     const configureIndexingService = strapi.plugins['elasticsearch'].services.configureIndexing;
     const logIndexingService = strapi.plugins['elasticsearch'].services.logIndexing;
-    const esInterface = strapi.plugins['elasticsearch'].services.esInterface;
-    const helper = strapi.plugins['elasticsearch'].services.helper;
     const recs = await scheduleIndexingService.getItemsPendingToBeIndexed();
+    console.log(
+      'strapi-plugin-elasticsearch : indexPendingData start',
+      stringifyForLog({
+        recCount: recs.length,
+        records: recs.map((rec) => ({
+          taskDocumentId: rec.documentId,
+          collection_name: rec.collection_name,
+          item_document_id: rec.item_document_id,
+          indexing_type: rec.indexing_type,
+          full_site_indexing: rec.full_site_indexing,
+          createdAt: rec.createdAt,
+        })),
+      })
+    );
     const fullSiteIndexing = recs.filter((r) => r.full_site_indexing === true).length > 0;
     if (fullSiteIndexing) {
       await this.rebuildIndex();
@@ -215,45 +435,46 @@ module.exports = ({ strapi }) => ({
         let fullCollectionIndexing = false;
         for (let r = 0; r < recs.length; r++) {
           const col = recs[r].collection_name;
-          if (configureIndexingService.isCollectionConfiguredToBeIndexed(col)) {
+          console.log(
+            'strapi-plugin-elasticsearch : indexPendingData processing task',
+            stringifyForLog({
+              taskDocumentId: recs[r].documentId,
+              collection_name: col,
+              item_document_id: recs[r].item_document_id,
+              indexing_type: recs[r].indexing_type,
+              createdAt: recs[r].createdAt,
+            })
+          );
+          if (
+            await configureIndexingService.isCollectionConfiguredToBeIndexed({
+              collectionName: col,
+            })
+          ) {
             //Indexing the individual item
             if (recs[r].item_document_id) {
-              if (recs[r].indexing_type !== 'remove-from-index') {
-                const populateAttrib = helper.getPopulateForACollection({ collectionName: col });
-                const item = await strapi.documents(col).findOne({
-                  documentId: recs[r].item_document_id,
-                  populate: populateAttrib['populate'],
-                });
-                const indexItemId = helper.getIndexItemId({
-                  collectionName: col,
-                  itemDocumentId: item.documentId,
-                });
-                const collectionConfig = await configureIndexingService.getCollectionConfig({
-                  collectionName: col,
-                });
-                const dataToIndex = await helper.extractDataToIndex({
-                  collectionName: col,
-                  data: item,
-                  collectionConfig,
-                });
-                await esInterface.indexData({
-                  itemId: indexItemId,
-                  itemData: dataToIndex,
-                  collectionName: col,
-                });
-                await scheduleIndexingService.markIndexingTaskCompleteByItemDocumentId(
-                  recs[r].item_document_id
-                );
-              } else {
-                const indexItemId = helper.getIndexItemId({
-                  collectionName: col,
-                  itemDocumentId: recs[r].item_document_id,
-                });
-                await esInterface.removeItemFromIndex({ itemId: indexItemId, collectionName: col });
-                await scheduleIndexingService.markIndexingTaskCompleteByItemDocumentId(
-                  recs[r].item_document_id
-                );
-              }
+              const itemDocumentId = recs[r].item_document_id;
+              const processedTaskCreatedAt = recs[r].createdAt;
+              const syncResult = await this.syncSingleItemNow({
+                collectionName: col,
+                itemDocumentId,
+                indexingType: recs[r].indexing_type,
+                triggerAction: 'queued-task',
+              });
+              console.log(
+                'strapi-plugin-elasticsearch : indexPendingData single-item sync result',
+                stringifyForLog({
+                  taskDocumentId: recs[r].documentId,
+                  collection_name: col,
+                  item_document_id: itemDocumentId,
+                  indexing_type: recs[r].indexing_type,
+                  syncResult,
+                })
+              );
+              await scheduleIndexingService.markIndexingTaskCompleteByItemDocumentId({
+                recId: itemDocumentId,
+                collectionUid: col,
+                processedTaskCreatedAt,
+              });
             } //index the entire collection
             else {
               //PENDING : Index an entire collection

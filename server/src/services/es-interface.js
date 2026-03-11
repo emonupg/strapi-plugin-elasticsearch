@@ -4,9 +4,43 @@ const path = require('path');
 
 let client = null;
 
+const stringifyForLog = (value) => {
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    return JSON.stringify({ message: 'Unable to stringify log payload', error: err?.message });
+  }
+};
+
+const wait = async (milliseconds) => {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+};
+
+const isRetryableIndexingError = (err) => {
+  if (!err) {
+    return false;
+  }
+
+  if (err.name === 'TimeoutError' || String(err.message || '').includes('Request timed out')) {
+    return true;
+  }
+
+  const statusCode = err.meta?.statusCode;
+  return [429, 502, 503, 504].includes(statusCode);
+};
+
 module.exports = ({ strapi }) => ({
-  async initializeSearchEngine({ host, uname, password, cert }) {
+  async initializeSearchEngine({ host, uname, password, cert, requestTimeout, maxRetries }) {
     try {
+      const resolvedRequestTimeout =
+        Number.isFinite(Number(requestTimeout)) && Number(requestTimeout) > 0
+          ? Number(requestTimeout)
+          : 120000;
+      const resolvedMaxRetries =
+        Number.isFinite(Number(maxRetries)) && Number(maxRetries) >= 0 ? Number(maxRetries) : 3;
+
       client = new Client({
         node: host,
         auth: {
@@ -17,6 +51,8 @@ module.exports = ({ strapi }) => ({
           ca: cert,
           rejectUnauthorized: false,
         },
+        requestTimeout: resolvedRequestTimeout,
+        maxRetries: resolvedMaxRetries,
       });
     } catch (err) {
       if (err.message.includes('ECONNREFUSED')) {
@@ -232,18 +268,87 @@ module.exports = ({ strapi }) => ({
       return false;
     }
   },
-  async indexDataToSpecificIndex({ itemId, itemData }, iName) {
+  async indexDataToSpecificIndex({ itemId, itemData }, iName, options = {}) {
+    const refresh = options.refresh !== false;
+    const retries =
+      Number.isFinite(Number(options.retries)) && Number(options.retries) >= 0
+        ? Number(options.retries)
+        : 2;
+
     try {
-      await client.index({
-        index: iName,
-        id: itemId,
-        document: itemData,
-      });
-      await client.indices.refresh({ index: iName });
+      let attempt = 0;
+      while (attempt <= retries) {
+        try {
+          console.log(
+            'strapi-plugin-elasticsearch : ES index request',
+            stringifyForLog({
+              index: iName,
+              itemId,
+              refresh,
+              attempt,
+              retries,
+              itemData,
+            })
+          );
+          await client.index({
+            index: iName,
+            id: itemId,
+            document: itemData,
+          });
+
+          if (refresh) {
+            await client.indices.refresh({ index: iName });
+          }
+
+          console.log(
+            'strapi-plugin-elasticsearch : ES index success',
+            stringifyForLog({ index: iName, itemId, refresh, attempt })
+          );
+
+          return;
+        } catch (err) {
+          const shouldRetry = isRetryableIndexingError(err) && attempt < retries;
+          if (!shouldRetry) {
+            throw err;
+          }
+
+          attempt += 1;
+          const retryDelay = 200 * attempt;
+          console.log(
+            `strapi-plugin-elasticsearch : Retrying index request for ${iName} (${attempt}/${retries})`
+          );
+          console.log(
+            'strapi-plugin-elasticsearch : ES index retry reason',
+            stringifyForLog({
+              index: iName,
+              itemId,
+              attempt,
+              retries,
+              errorName: err?.name,
+              errorMessage: err?.message,
+              statusCode: err?.meta?.statusCode,
+            })
+          );
+          await wait(retryDelay);
+        }
+      }
     } catch (err) {
       console.log(
         'strapi-plugin-elasticsearch : Error encountered while indexing data to ElasticSearch.'
       );
+      console.log(err);
+      throw err;
+    }
+  },
+  async refreshIndex(indexName) {
+    if (!indexName) {
+      return;
+    }
+
+    try {
+      await client.indices.refresh({ index: indexName });
+    } catch (err) {
+      console.log('strapi-plugin-elasticsearch : Error while refreshing index.', indexName);
       console.log(err);
       throw err;
     }
@@ -269,13 +374,22 @@ module.exports = ({ strapi }) => ({
         indexTarget = pluginConfig.indexAliasName;
       }
 
+      console.log(
+        'strapi-plugin-elasticsearch : ES delete request',
+        stringifyForLog({ index: indexTarget, itemId, collectionName })
+      );
+
       await client.delete({
         index: indexTarget,
         id: itemId,
       });
       await client.indices.refresh({ index: indexTarget });
+      console.log(
+        'strapi-plugin-elasticsearch : ES delete success',
+        stringifyForLog({ index: indexTarget, itemId, collectionName })
+      );
     } catch (err) {
-      if (err.meta.statusCode === 404)
+      if (err?.meta?.statusCode === 404)
         console.error(
           'strapi-plugin-elasticsearch : The entry to be removed from the index already does not exist.'
         );

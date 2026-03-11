@@ -8,17 +8,28 @@ module.exports = ({ strapi }) => ({
       const helper = strapi.plugins['elasticsearch'].services.helper;
       const configureIndexingService = strapi.plugins['elasticsearch'].services.configureIndexing;
       const pluginConfig = await strapi.config.get('plugin::elasticsearch');
+      const connector = pluginConfig.searchConnector || {};
+      const requestTimeout =
+        Number.isFinite(Number(connector.requestTimeout)) && Number(connector.requestTimeout) > 0
+          ? Number(connector.requestTimeout)
+          : 120000;
+      const maxRetries =
+        Number.isFinite(Number(connector.maxRetries)) && Number(connector.maxRetries) >= 0
+          ? Number(connector.maxRetries)
+          : 3;
 
       const client = new Client({
-        node: pluginConfig.searchConnector.host,
+        node: connector.host,
         auth: {
-          username: pluginConfig.searchConnector.username,
-          password: pluginConfig.searchConnector.password,
+          username: connector.username,
+          password: connector.password,
         },
         tls: {
-          ca: pluginConfig.searchConnector.certificate,
+          ca: connector.certificate,
           rejectUnauthorized: false,
         },
+        requestTimeout,
+        maxRetries,
       });
 
       const validationResult = {
@@ -47,20 +58,28 @@ module.exports = ({ strapi }) => ({
 
       const isCollectionDraftPublish = helper.isCollectionDraftPublish({ collectionName });
       const populateAttrib = helper.getPopulateForACollection({ collectionName });
+      const collectionConfig = await configureIndexingService.getCollectionConfig({
+        collectionName,
+      });
+      const syncFilterField = configureIndexingService.getSyncFilterField({
+        collectionConfig,
+        collectionName,
+      });
+
+      const queryParams = {
+        sort: { createdAt: 'DESC' },
+        populate: populateAttrib['populate'],
+      };
+
+      if (isCollectionDraftPublish) {
+        queryParams.status = 'published';
+      }
+      if (syncFilterField) {
+        queryParams.filters = { [syncFilterField]: true };
+      }
 
       let strapiEntries = [];
-      if (isCollectionDraftPublish) {
-        strapiEntries = await strapi.documents(collectionName).findMany({
-          sort: { createdAt: 'DESC' },
-          populate: populateAttrib['populate'],
-          status: 'published',
-        });
-      } else {
-        strapiEntries = await strapi.documents(collectionName).findMany({
-          sort: { createdAt: 'DESC' },
-          populate: populateAttrib['populate'],
-        });
-      }
+      strapiEntries = await strapi.documents(collectionName).findMany(queryParams);
 
       const strapiCount = strapiEntries.length;
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Page } from '@strapi/admin/strapi-admin';
 import { useFetchClient } from '@strapi/admin/strapi-admin';
 import { useParams } from 'react-router-dom';
@@ -137,32 +137,49 @@ const ConfigureCollection = () => {
   const params = useParams();
   const [alertContent, setAlertContent] = useState(null);
   const { get, post } = useFetchClient();
-  const showMessage = ({ variant, title, text }) => {
+  const showMessage = useCallback(({ variant, title, text }) => {
     setAlertContent({ variant, title, text });
     setTimeout(() => {
       setAlertContent(null);
     }, 5000);
-  };
+  }, []);
   const updateCollectionsConfig = ({ index, config }) => {
     setCollectionConfig({
       collectionName: collectionConfig.collectionName,
+      collectionSettings: collectionConfig.collectionSettings,
       attributes: collectionConfig.attributes.map((e, idx) => (index === idx ? config : e)),
     });
   };
 
-  const loadTransformers = () => {
-    return get(apiGetTransformers).then((resp) => resp.data);
-  };
-
-  const loadConfigForCollection = (collectionName) => {
-    return get(apiGetCollectionConfig(collectionName)).then((resp) => resp.data);
-  };
-
-  const saveConfigForCollection = (collectionName, data) => {
-    return post(apiSaveCollectionConfig(collectionName), {
-      data,
+  const updateSyncFilterField = (syncFilterField) => {
+    setCollectionConfig({
+      ...collectionConfig,
+      collectionSettings: {
+        ...(collectionConfig.collectionSettings || {}),
+        syncFilterField,
+      },
     });
   };
+
+  const loadTransformers = useCallback(() => {
+    return get(apiGetTransformers).then((resp) => resp.data);
+  }, [get]);
+
+  const loadConfigForCollection = useCallback(
+    (collectionName) => {
+      return get(apiGetCollectionConfig(collectionName)).then((resp) => resp.data);
+    },
+    [get]
+  );
+
+  const saveConfigForCollection = useCallback(
+    (collectionName, data) => {
+      return post(apiSaveCollectionConfig(collectionName), {
+        data,
+      });
+    },
+    [post]
+  );
 
   const saveCollectionConfig = () => {
     if (collectionConfig && collectionConfig.collectionName) {
@@ -172,6 +189,11 @@ const ConfigureCollection = () => {
         const { name, ...attribs } = collectionConfig.attributes[k];
         data[collectionConfig.collectionName][name] = attribs;
       }
+      const syncFilterField = collectionConfig.collectionSettings?.syncFilterField;
+      data[collectionConfig.collectionName]._collectionSettings = syncFilterField
+        ? { syncFilterField }
+        : {};
+
       setIsInProgress(true);
       saveConfigForCollection(collectionConfig.collectionName, data)
         .then((resp) => {
@@ -197,7 +219,7 @@ const ConfigureCollection = () => {
 
   useEffect(() => {
     loadTransformers().then((resp) => setTransformersList(resp));
-  }, [selectedCollection]);
+  }, [loadTransformers]);
 
   useEffect(() => {
     if (params && params.collectionName) setSelectedCollection(params.collectionName);
@@ -215,14 +237,23 @@ const ConfigureCollection = () => {
             });
           } else {
             const collectionName = Object.keys(resp)[0];
-            const attributeNames = Object.keys(resp[collectionName]);
+            const collectionSettings = resp[collectionName]._collectionSettings || {};
+            const attributeNames = Object.keys(resp[collectionName]).filter(
+              (fieldName) => fieldName !== '_collectionSettings'
+            );
             const attributes = [];
             for (let s = 0; s < attributeNames.length; s++)
               attributes.push({
                 name: attributeNames[s],
                 ...resp[collectionName][attributeNames[s]],
               });
-            const item = { collectionName, attributes };
+            const item = {
+              collectionName,
+              attributes,
+              collectionSettings: {
+                syncFilterField: collectionSettings.syncFilterField || '',
+              },
+            };
             setCollectionConfig(item);
           }
         })
@@ -236,70 +267,94 @@ const ConfigureCollection = () => {
           console.log(err);
         });
     }
-  }, [selectedCollection]);
+  }, [selectedCollection, loadConfigForCollection, showMessage]);
 
   if (collectionConfig === null) return <Loader />;
-  else
-    return (
-      <Page.Main>
-        <Page.Title>Configure Collection {selectedCollection}</Page.Title>
-        <Flex alignItems="stretch" gap={4}>
-          <SubNavigation activeUrl={`/plugins/${pluginId}/configure-collections`} />
-          <Box padding={8} background="neutral100" width="100%">
+  const booleanAttributes = collectionConfig.attributes.filter(
+    (attribute) => attribute.type === 'boolean'
+  );
+
+  return (
+    <Page.Main>
+      <Page.Title>Configure Collection {selectedCollection}</Page.Title>
+      <Flex alignItems="stretch" gap={4}>
+        <SubNavigation activeUrl={`/plugins/${pluginId}/configure-collections`} />
+        <Box padding={8} background="neutral100" width="100%">
+          <Box paddingBottom={4}>
+            <Link
+              startIcon={<ArrowLeft />}
+              href={`/admin/plugins/${pluginId}/configure-collections`}
+            >
+              Back
+            </Link>
+          </Box>
+          {selectedCollection && (
             <Box paddingBottom={4}>
-              <Link
-                startIcon={<ArrowLeft />}
-                href={`/admin/plugins/${pluginId}/configure-collections`}
-              >
-                Back
-              </Link>
+              <Typography variant="alpha">{selectedCollection}</Typography>
             </Box>
-            {selectedCollection && (
-              <Box paddingBottom={4}>
-                <Typography variant="alpha">{selectedCollection}</Typography>
-              </Box>
-            )}
-            {alertContent && (
-              <Alert
-                closeLabel="Close alert"
-                title={alertContent.title}
-                variant={alertContent.variant}
-              >
-                {alertContent.text}
-              </Alert>
-            )}
-            {collectionConfig && (
-              <>
-                <Flex paddingTop={8} alignItems="stretch" gap={4} width="100%">
-                  <Box padding={8} background="neutral0" width="100%">
-                    <Box paddingBottom={2}>
-                      <Typography variant="beta">Attributes</Typography>
-                      {collectionConfig.attributes.map((a, idx) => {
-                        return (
-                          <Box paddingTop={4} paddingBottom={4}>
-                            <ConfigureField
-                              index={idx}
-                              config={a}
-                              setFieldConfig={updateCollectionsConfig}
-                              transformersList={transformersList}
-                            />
-                          </Box>
-                        );
-                      })}
+          )}
+          {alertContent && (
+            <Alert
+              closeLabel="Close alert"
+              title={alertContent.title}
+              variant={alertContent.variant}
+            >
+              {alertContent.text}
+            </Alert>
+          )}
+          {collectionConfig && (
+            <>
+              <Flex paddingTop={8} alignItems="stretch" gap={4} width="100%">
+                <Box padding={8} background="neutral0" width="100%">
+                  <Box paddingBottom={6}>
+                    <Typography variant="beta">Collection Settings</Typography>
+                    <Box paddingTop={3}>
+                      <SingleSelect
+                        label="Sync filter field"
+                        hint="Only records with value true are synced when selected."
+                        placeholder="Select a boolean field"
+                        name="syncFilterField"
+                        value={collectionConfig.collectionSettings?.syncFilterField || ''}
+                        onChange={updateSyncFilterField}
+                        disabled={booleanAttributes.length === 0}
+                      >
+                        <SingleSelectOption value="">None</SingleSelectOption>
+                        {booleanAttributes.map((attribute) => (
+                          <SingleSelectOption value={attribute.name} key={attribute.name}>
+                            {attribute.name}
+                          </SingleSelectOption>
+                        ))}
+                      </SingleSelect>
                     </Box>
                   </Box>
-                </Flex>
-                <Box paddingTop={4}>
-                  <Button loading={isInProgress} variant="default" onClick={saveCollectionConfig}>
-                    Save Configuration Changes
-                  </Button>
+                  <Box paddingBottom={2}>
+                    <Typography variant="beta">Attributes</Typography>
+                    {collectionConfig.attributes.map((a, idx) => {
+                      return (
+                        <Box key={a.name} paddingTop={4} paddingBottom={4}>
+                          <ConfigureField
+                            index={idx}
+                            config={a}
+                            setFieldConfig={updateCollectionsConfig}
+                            transformersList={transformersList}
+                          />
+                        </Box>
+                      );
+                    })}
+                  </Box>
                 </Box>
-              </>
-            )}
-          </Box>
-        </Flex>
-      </Page.Main>
-    );
+              </Flex>
+              <Box paddingTop={4}>
+                <Button loading={isInProgress} variant="default" onClick={saveCollectionConfig}>
+                  Save Configuration Changes
+                </Button>
+              </Box>
+            </>
+          )}
+        </Box>
+      </Flex>
+    </Page.Main>
+  );
 };
 
 export default ConfigureCollection;
