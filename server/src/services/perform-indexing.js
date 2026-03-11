@@ -161,13 +161,12 @@ module.exports = ({ strapi }) => ({
 
   async indexCollection(collectionName, indexName = null) {
     const helper = strapi.plugins['elasticsearch'].services.helper;
-    // Use no-relations populate to avoid PostgreSQL bind-parameter overflow (>65535 params)
-    // when collections have large relation sets during bulk rebuild.
-    const populateAttrib = helper.getPopulateForACollectionNoRelations({ collectionName });
+    // Full populate (including relations) — used in Phase 2 per-document findOne queries
+    const populateAttrib = helper.getPopulateForACollection({ collectionName });
     const isCollectionDraftPublish = helper.isCollectionDraftPublish({ collectionName });
     const configureIndexingService = strapi.plugins['elasticsearch'].services.configureIndexing;
     const esInterface = strapi.plugins['elasticsearch'].services.esInterface;
-    const pageSize = 1000;
+    const idPageSize = 500;
 
     if (indexName === null) {
       indexName = await helper.getCurrentIndexName(collectionName);
@@ -179,16 +178,18 @@ module.exports = ({ strapi }) => ({
       collectionName,
     });
 
-    const queryParams = {
+    // Lightweight query params for Phase 1 (ID fetching only)
+    const idQueryParams = {
       sort: { createdAt: 'DESC' },
-      populate: populateAttrib['populate'],
+      fields: ['documentId'],
+      populate: {},
     };
 
     if (isCollectionDraftPublish) {
-      queryParams.status = 'published';
+      idQueryParams.status = 'published';
     }
     if (syncFilterField) {
-      queryParams.filters = { [syncFilterField]: true };
+      idQueryParams.filters = { [syncFilterField]: true };
     }
 
     console.log(
@@ -196,39 +197,79 @@ module.exports = ({ strapi }) => ({
       stringifyForLog({
         collectionName,
         indexName,
-        pageSize,
+        idPageSize,
         isCollectionDraftPublish,
         syncFilterField,
-        queryParams,
       })
     );
 
+    // Phase 1: Collect all documentIds using lightweight paginated queries (no populate)
+    const allDocumentIds = [];
     let start = 0;
-    let indexedItems = 0;
     while (true) {
-      const entries = await strapi.documents(collectionName).findMany({
-        ...queryParams,
+      const idEntries = await strapi.documents(collectionName).findMany({
+        ...idQueryParams,
         start,
-        limit: pageSize,
+        limit: idPageSize,
       });
 
-      console.log(
-        'strapi-plugin-elasticsearch : indexCollection page fetched',
-        stringifyForLog({
-          collectionName,
-          indexName,
-          start,
-          fetched: entries ? entries.length : 0,
-          documentIds: (entries || []).map((entry) => entry.documentId),
-        })
-      );
-
-      if (!entries || entries.length === 0) {
+      if (!idEntries || idEntries.length === 0) {
         break;
       }
 
-      for (let s = 0; s < entries.length; s++) {
-        const item = entries[s];
+      for (const entry of idEntries) {
+        allDocumentIds.push(entry.documentId);
+      }
+
+      console.log(
+        'strapi-plugin-elasticsearch : indexCollection IDs fetched',
+        stringifyForLog({
+          collectionName,
+          start,
+          fetched: idEntries.length,
+          totalIds: allDocumentIds.length,
+        })
+      );
+
+      start += idEntries.length;
+      if (idEntries.length < idPageSize) {
+        break;
+      }
+    }
+
+    console.log(
+      'strapi-plugin-elasticsearch : indexCollection Phase 1 complete',
+      stringifyForLog({
+        collectionName,
+        indexName,
+        totalDocumentIds: allDocumentIds.length,
+      })
+    );
+
+    // Phase 2: Load each document with full populate via findOne and index it
+    const findOneParams = {
+      populate: populateAttrib['populate'],
+    };
+    if (isCollectionDraftPublish) {
+      findOneParams.status = 'published';
+    }
+
+    let indexedItems = 0;
+    for (const documentId of allDocumentIds) {
+      try {
+        const item = await strapi.documents(collectionName).findOne({
+          documentId,
+          ...findOneParams,
+        });
+
+        if (!item) {
+          console.log(
+            'strapi-plugin-elasticsearch : indexCollection item not found, skipping',
+            stringifyForLog({ collectionName, documentId })
+          );
+          continue;
+        }
+
         const indexItemId = helper.getIndexItemId({
           collectionName: collectionName,
           itemDocumentId: item.documentId,
@@ -243,29 +284,31 @@ module.exports = ({ strapi }) => ({
           indexName,
           { refresh: false }
         );
-        console.log(
-          'strapi-plugin-elasticsearch : indexCollection item indexed',
-          stringifyForLog({
-            collectionName,
-            indexName,
-            itemDocumentId: item.documentId,
-            indexItemId,
-            itemData: dataToIndex,
-          })
-        );
         indexedItems += 1;
-      }
 
-      start += entries.length;
-      if (entries.length < pageSize) {
-        break;
+        if (indexedItems % 500 === 0) {
+          console.log(
+            'strapi-plugin-elasticsearch : indexCollection progress',
+            stringifyForLog({
+              collectionName,
+              indexName,
+              indexedItems,
+              totalDocumentIds: allDocumentIds.length,
+            })
+          );
+        }
+      } catch (err) {
+        console.error(
+          'strapi-plugin-elasticsearch : indexCollection item error',
+          stringifyForLog({ collectionName, documentId, error: err.message })
+        );
       }
     }
 
     if (indexedItems > 0) {
       await esInterface.refreshIndex(indexName);
       console.log(
-        'strapi-plugin-elasticsearch : indexCollection refresh complete',
+        'strapi-plugin-elasticsearch : indexCollection complete',
         stringifyForLog({ collectionName, indexName, indexedItems })
       );
     }

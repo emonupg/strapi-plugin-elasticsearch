@@ -57,7 +57,8 @@ module.exports = ({ strapi }) => ({
       });
 
       const isCollectionDraftPublish = helper.isCollectionDraftPublish({ collectionName });
-      const populateAttrib = helper.getPopulateForACollection({ collectionName });
+      // Use no-relations populate to avoid PostgreSQL bind-parameter overflow
+      const populateAttrib = helper.getPopulateForACollectionNoRelations({ collectionName });
       const collectionConfig = await configureIndexingService.getCollectionConfig({
         collectionName,
       });
@@ -78,10 +79,23 @@ module.exports = ({ strapi }) => ({
         queryParams.filters = { [syncFilterField]: true };
       }
 
-      let strapiEntries = [];
-      strapiEntries = await strapi.documents(collectionName).findMany(queryParams);
-
-      const strapiCount = strapiEntries.length;
+      // Count Strapi records using pagination to avoid bind-parameter overflow
+      const countPageSize = 100;
+      let strapiCount = 0;
+      let countStart = 0;
+      while (true) {
+        const page = await strapi.documents(collectionName).findMany({
+          ...queryParams,
+          start: countStart,
+          limit: countPageSize,
+          fields: ['documentId'],
+          populate: {},
+        });
+        if (!page || page.length === 0) break;
+        strapiCount += page.length;
+        countStart += page.length;
+        if (page.length < countPageSize) break;
+      }
 
       const esCountResult = await client.count({ index: indexName });
       const esCount = esCountResult.count;
@@ -101,18 +115,26 @@ module.exports = ({ strapi }) => ({
         validationResult.success = false;
       }
 
-      if (strapiEntries.length > 0) {
-        const sampleSize = Math.min(5, strapiEntries.length);
-        const sampleIndices = [];
-        for (let i = 0; i < sampleSize; i++) {
-          const randomIndex = Math.floor(Math.random() * strapiEntries.length);
-          if (!sampleIndices.includes(randomIndex)) {
-            sampleIndices.push(randomIndex);
-          }
+      // Sample random documents for spot-checking
+      if (strapiCount > 0) {
+        const sampleSize = Math.min(5, strapiCount);
+        const sampleOffsets = new Set();
+        while (sampleOffsets.size < sampleSize) {
+          sampleOffsets.add(Math.floor(Math.random() * strapiCount));
         }
 
-        for (const idx of sampleIndices) {
-          const sampleEntry = strapiEntries[idx];
+        for (const offset of sampleOffsets) {
+          const samplePage = await strapi.documents(collectionName).findMany({
+            ...queryParams,
+            start: offset,
+            limit: 1,
+            fields: ['documentId'],
+            populate: {},
+          });
+
+          if (!samplePage || samplePage.length === 0) continue;
+
+          const sampleEntry = samplePage[0];
           const docId = helper.getIndexItemId({
             collectionName,
             itemDocumentId: sampleEntry.documentId,
